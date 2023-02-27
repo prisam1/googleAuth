@@ -1,65 +1,140 @@
+const express = require('express')
+const passport = require('passport')
 
-const express = require('express');
-const app = express();
-const session = require('express-session');
+const cookieParser = require('cookie-parser')
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
 
-app.set('view engine', 'ejs');
+const DATA = [{email:"test@gmail.com", password:"1234"}]
 
-app.use(session({
-  resave: false,
-  saveUninitialized: true, 
-  secret: 'SECRET' 
+const app = express()
+app.use(express.urlencoded({ extended: false })) 
+app.use(cookieParser())
+app.use(passport.initialize());
+
+
+const jwt = require('jsonwebtoken')
+var JwtStrategy = require('passport-jwt').Strategy,
+    ExtractJwt = require('passport-jwt').ExtractJwt;
+var opts = {}
+opts.jwtFromRequest = function(req) {
+    var token = null;
+    if (req && req.cookies)
+    {
+        token = req.cookies['jwt'];
+    }
+    return token;
+};
+opts.secretOrKey = 'secret';
+
+
+
+passport.use(new JwtStrategy(opts, function(jwt_payload, done) {
+    console.log("JWT BASED  VALIDATION GETTING CALLED")
+    console.log("JWT", jwt_payload)
+    if (CheckUser(jwt_payload.data)) {
+        return done(null, jwt_payload.data)
+    } else {
+   
+        return done(null, false);
+    }
 }));
 
-app.get('/', function(req, res) {
-  res.render('pages/auth');
-});
-
-const port = process.env.PORT || 3000;
-app.listen(port , () => console.log('App listening on port ' + port));
-
-
-
-const passport = require('passport');
-var userProfile;
-
-app.use(passport.initialize());
-app.use(passport.session());
-
-app.set('view engine', 'ejs');
-
-app.get('/success', (req, res) => res.send(userProfile));
-app.get('/error', (req, res) => res.send("error logging in"));
-
-passport.serializeUser(function(user, cb) {
-  cb(null, user);
-});
-
-passport.deserializeUser(function(obj, cb) {
-  cb(null, obj);
-});
-
-
-const GoogleStrategy = require('passport-google-oauth').OAuth2Strategy;
-const GOOGLE_CLIENT_ID = '116899161955996831498';
-const GOOGLE_CLIENT_SECRET = '367be4b3891581af7c111251f2af0f11b3d15763';
 passport.use(new GoogleStrategy({
-    clientID: GOOGLE_CLIENT_ID,
-    clientSecret: GOOGLE_CLIENT_SECRET,
-    callbackURL: "http://localhost:3000/auth/google/callback"
+    clientID: "116899161955996831498",
+    clientSecret: "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDngqwiWNM/gtNV",
+    callbackURL: "http://localhost:3000/googleRedirect"
   },
-  function(accessToken, refreshToken, profile, done) {
-      userProfile=profile;
-      return done(null, userProfile);
+  function(accessToken, refreshToken, profile, cb) {
+     
+      console.log("GOOGLE BASED OAUTH VALIDATION GETTING CALLED")
+      return cb(null, profile)
   }
 ));
+
+
+passport.serializeUser(function(user, cb) {
+    
+    cb(null, user);
+});
+  
+  passport.deserializeUser(function(obj, cb) {
+    console.log('I wont have jack shit')
+    cb(null, obj);
+});
  
-app.get('/auth/google', 
-  passport.authenticate('google', { scope : ['profile', 'email'] }));
- 
-app.get('/auth/google/callback', 
-  passport.authenticate('google', { failureRedirect: '/error' }),
-  function(req, res) {
+app.get('/', (req, res)=>{
+    res.sendFile('home.html', {root: __dirname+'/public'})
+})
+
+app.get('/login', (req, res)=>{
+    res.sendFile('login.html', {root: __dirname+'/public'})
+})
+
+app.get('/auth/email', (req, res)=>{
+    res.sendFile('login_form.html',  {root: __dirname+'/public'})
+})
+
+app.get('/auth/google',  passport.authenticate('google', { scope: ['profile','email'] }))
+
+app.post('/auth/email', (req, res)=>{
    
-    res.redirect('/success');
-  });
+    if(CheckUser(req.body))
+    {
+        let token =    jwt.sign({
+            data: req.body
+            }, 'secret', { expiresIn: '1h' });
+        res.cookie('jwt', token)
+        res.send(`Log in success ${req.body.email}`)
+    }else{
+        res.send('Invalid login credentials')
+    }
+})
+
+app.get('/profile', passport.authenticate('jwt', { session: false }) ,(req,res)=>{
+    res.send(`THIS IS UR PROFILE MAAANNNN ${req.user.email}`)
+})
+
+app.get('/googleRedirect', passport.authenticate('google'),(req, res)=>{
+    console.log('redirected', req.user)
+    let user = {
+        displayName: req.user.displayName,
+        name: req.user.name.givenName,
+        email: req.user._json.email,
+        provider: req.user.provider }
+    console.log(user)
+
+    FindOrCreate(user)
+    let token = jwt.sign({
+        data: user
+        }, 'secret', { expiresIn: '1h' });
+    res.cookie('jwt', token)
+    res.redirect('/')
+})
+
+function FindOrCreate(user){
+    if(CheckUser(user)){  
+        return user
+    }else{
+        DATA.push(user)
+    }
+}
+function CheckUser(input){
+    console.log(DATA)
+    console.log(input)
+  
+    for (var i in DATA) {
+        if(input.email==DATA[i].email && (input.password==DATA[i].password || DATA[i].provider==input.provider))
+        {
+            console.log('User found in DATA')
+            return true
+        }
+        else
+         null
+            
+      }
+    return false
+}
+const port = process.env.PORT || 3000
+app.listen( port, ()=>{
+    console.log(`Sever runing on port ${port}`)
+})
